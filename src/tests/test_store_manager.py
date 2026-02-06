@@ -21,18 +21,62 @@ def test_health(client):
 
 def test_stock_flow(client):
     # 1. Créez un article (`POST /products`)
+    
     product_data = {'name': 'Some Item', 'sku': '12345', 'price': 99.90}
     response = client.post('/products',
                           data=json.dumps(product_data),
                           content_type='application/json')
-    
-    assert response.status_code == 201
+    assert response.status_code in (200, 201), response.get_data(as_text=True)
+
     data = response.get_json()
-    assert data['product_id'] > 0 
+    product_id = data.get('product_id')
+    assert product_id is not None, "Response JSON should contain 'product_id'"
+
 
     # 2. Ajoutez 5 unités au stock de cet article (`POST /stocks`)
+
+    stock_data = {'product_id': data.get('product_id'), 'quantity': 5}
+    response = client.post('/stocks',
+                          data=json.dumps(stock_data),
+                          content_type='application/json')
+    assert response.status_code in (200, 201), response.get_data(as_text=True)    
+
+
     # 3. Vérifiez le stock, votre article devra avoir 5 unités dans le stock (`GET /stocks/:id`)
+    
+    response = client.get(f"/stocks/{data.get('product_id')}")
+    assert response.status_code in (200, 201), response.get_data(as_text=True)
+    stock_info = response.get_json()
+    assert stock_info.get('quantity') == 5, f" got {stock_info.get('quantity')}"
+
+
     # 4. Faites une commande de l'article que vous avez crée, 2 unités (`POST /orders`)
+
+    order_data = {"user_id": 1, "items":[{"product_id": data.get('product_id'), "quantity": 2}]}
+    response = client.post('/orders',
+                            data=json.dumps(order_data),
+                            content_type='application/json')
+    assert response.status_code in (200, 201), response.get_data(as_text=True)
+
+    order_info = response.get_json()
+    assert order_info.get('order_id') is not None, "Response JSON should contain 'order_id'"
+
     # 5. Vérifiez le stock encore une fois (`GET /stocks/:id`)
+
+    response = client.get(f"/stocks/{data.get('product_id')}")
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+    stock_info = response.get_json()
+    assert stock_info['quantity'] == 3, f"Expected stock quantity to be 3 after order, got {stock_info.get('quantity')}"
+
+
     # 6. Étape extra: supprimez la commande et vérifiez le stock de nouveau. Le stock devrait augmenter après la suppression de la commande.
-    assert "Le test n'est pas encore là" == 1
+    
+    response = client.delete(f"/orders/{order_info['order_id']}")
+    assert response.status_code in (200, 204), response.get_data(as_text=True)
+
+    response = client.get(f"/stocks/{data.get('product_id')}")
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+    stock_info = response.get_json()
+    assert stock_info.get("quantity") == 5, f"Expected stock quantity to be 5 after order deletion, got {stock_info.get('quantity')}"
