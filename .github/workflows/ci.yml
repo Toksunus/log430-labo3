@@ -23,7 +23,7 @@ jobs:
           pip install -r requirements.txt
       
       - name: Stop existing containers
-        run: docker-compose down || true
+        run: docker-compose down -v || true
         continue-on-error: true
 
       - name: Create network
@@ -34,7 +34,7 @@ jobs:
         run: docker-compose up -d mysql redis
 
       - name: Wait for MySQL and Redis to be healthy
-        run: sleep 20
+        run: sleep 30
 
       - name: Creer fichier .env
         run: |
@@ -53,4 +53,4 @@ jobs:
 
       - name: Cleanup
         if: always()
-        run: docker-compose down
+        run: docker-compose down -v
