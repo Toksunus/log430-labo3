@@ -14,9 +14,11 @@ class Query(ObjectType):
         # TODO: ajoutez les colonnes name, sku, price
         if product_data:
             return Product(
-                id=id,
-                name=f"Product {id}",
-                quantity=int(product_data['quantity'])
+                id=int(id),
+                name=product_data.get('name'),
+                sku=product_data.get('sku'),
+                price=float(product_data.get('price', 0)),
+                quantity=int(product_data.get('quantity', 0))
             )
         return None
     

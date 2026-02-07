@@ -6,6 +6,7 @@ Auteurs : Gabriel C. Ullmann, Fabio Petrillo, 2025
 from sqlalchemy import text
 from stocks.models.stock import Stock
 from db import get_redis_conn, get_sqlalchemy_session
+from stocks.models.product import Product
 
 def set_stock_for_product(product_id, quantity):
     """Set stock quantity for product in MySQL"""
@@ -26,9 +27,20 @@ def set_stock_for_product(product_id, quantity):
             response_message = f"rows added, product {new_stock.product_id}"
             session.flush() 
             session.commit()
+
+        product = session.query(Product).filter_by(id=product_id).first()
   
         r = get_redis_conn()
-        r.hset(f"stock:{product_id}", "quantity", quantity)
+        if product:
+            r.hset(f"stock:{product_id}", mapping={
+                "quantity": quantity,
+                "name": product.name,
+                "sku": product.sku,
+                "price": float(product.price),
+            })
+        else:
+            r.hset(f"stock:{product_id}", "quantity", quantity)
+            
         return response_message
     except Exception as e:
         session.rollback()
@@ -73,26 +85,38 @@ def update_stock_redis(order_items, operation):
     stock_keys = list(r.scan_iter("stock:*"))
     if stock_keys:
         pipeline = r.pipeline()
-        for item in order_items:
-            if hasattr(item, 'product_id'):
-                product_id = item.product_id
-                quantity = item.quantity
-            else:
-                product_id = item['product_id']
-                quantity = item['quantity']
-            # TODO: ajoutez plus d'information sur l'article
-            current_stock = r.hget(f"stock:{product_id}", "quantity")
-            current_stock = int(current_stock) if current_stock else 0
-            
-            if operation == '+':
-                new_quantity = current_stock + quantity
-            else:  
-                new_quantity = current_stock - quantity
-            
-            pipeline.hset(f"stock:{product_id}", "quantity", new_quantity)
+        session = get_sqlalchemy_session()
+        try:
+            for item in order_items:
+                if hasattr(item, 'product_id'):
+                    product_id = item.product_id
+                    quantity = item.quantity
+                else:
+                    product_id = item['product_id']
+                    quantity = item['quantity']
+                # TODO: ajoutez plus d'information sur l'article
+                product = session.query(Product).filter_by(id=product_id).first()
+
+                current_stock = r.hget(f"stock:{product_id}", "quantity")
+                current_stock = int(current_stock) if current_stock else 0
+                
+                if operation == '+':
+                    new_quantity = current_stock + quantity
+                else:  
+                    new_quantity = current_stock - quantity
+                if product :
+                    pipeline.hset(f"stock:{product_id}", mapping={
+                        "quantity": new_quantity,
+                        "name": product.name,
+                        "sku": product.sku,
+                        "price": float(product.price),
+                    })
+                else:
+                    pipeline.hset(f"stock:{product_id}", "quantity", new_quantity)
         
-        pipeline.execute()
-    
+            pipeline.execute()
+        finally:
+            session.close()
     else:
         _populate_redis_from_mysql(r)
 
@@ -101,7 +125,7 @@ def _populate_redis_from_mysql(redis_conn):
     session = get_sqlalchemy_session()
     try:
         stocks = session.execute(
-            text("SELECT product_id, quantity FROM stocks")
+            text("SELECT stocks.product_id, stocks.quantity, products.name, products.sku, products.price FROM stocks JOIN products ON stocks.product_id = products.id")
         ).fetchall()
 
         if not len(stocks):
@@ -110,10 +134,10 @@ def _populate_redis_from_mysql(redis_conn):
         
         pipeline = redis_conn.pipeline()
         
-        for product_id, quantity in stocks:
+        for product_id, quantity, name, sku, price in stocks:
             pipeline.hset(
                 f"stock:{product_id}", 
-                mapping={ "quantity": quantity }
+                mapping={ "quantity": quantity, "name": name, "sku": sku, "price": float(price) }
             )
         
         pipeline.execute()
